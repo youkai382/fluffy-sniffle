@@ -83,6 +83,23 @@ Use `/cerebroso` para ver uma visão geral diretamente no Discord com exemplos r
 
 ---
 
+
+## 🧰 Instalação e solução de problemas
+
+### Como baixar o código com segurança
+1. Faça o download do repositório completo com `git clone https://github.com/<seu-usuario>/cerebroso.git` **ou** baixe o ZIP diretamente da página do GitHub.
+2. Evite copiar apenas o arquivo `cerebroso.py` usando links "raw" – provedores como GitHub podem responder `429: Too Many Requests` e salvar uma página de erro no lugar do código.
+3. Depois do download, confira rapidamente se o início do arquivo mostra `import asyncio`. Se vir qualquer mensagem HTML ou `429`, refaça o download antes de rodar.
+
+### Erro `429: Too Many Requests`
+Esse erro significa que o servidor onde você baixou o arquivo bloqueou o acesso temporariamente, e o Python acabou lendo a página de aviso como se fosse código. A solução é:
+- aguardar alguns minutos e baixar novamente o arquivo **seguindo o passo a passo acima**;
+- ou usar `git clone`/ZIP, que baixam todos os arquivos de uma vez e evitam esse problema.
+
+Após baixar corretamente, rode `pip install -r requirements.txt` e inicie o bot com `python cerebroso.py`.
+
+---
+
 ## 📚 Exemplos rápidos
 ```
 /pomodoro iniciar
