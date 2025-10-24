@@ -240,6 +240,8 @@ class CerebrosoBot(commands.Bot):
         self.habito_group = app_commands.Group(name="habito", description="Hábitos pessoais")
         self.rotina_group = app_commands.Group(name="rotina", description="Rotinas da Comunidade")
 
+        self._staff_commands: List[app_commands.Command] = []
+
         self._register_commands()
 
     async def setup_hook(self) -> None:
@@ -255,15 +257,20 @@ class CerebrosoBot(commands.Bot):
             task.cancel()
         await super().close()
 
+    def _register_guild_commands(self, guild: discord.abc.Snowflake) -> None:
+        for cmd in self._staff_commands:
+            self.tree.add_command(cmd, guild=guild)
+        self.tree.add_command(self.pomodoro_group, guild=guild)
+        self.tree.add_command(self.lembrete_group, guild=guild)
+        self.tree.add_command(self.habito_group, guild=guild)
+        self.tree.add_command(self.rotina_group, guild=guild)
+
     async def on_ready(self) -> None:
         logging.info("Conectado como %s", self.user)
         for guild in self.guilds:
             try:
                 self.tree.clear_commands(guild=guild)
-                self.tree.add_command(self.pomodoro_group, guild=guild)
-                self.tree.add_command(self.lembrete_group, guild=guild)
-                self.tree.add_command(self.habito_group, guild=guild)
-                self.tree.add_command(self.rotina_group, guild=guild)
+                self._register_guild_commands(guild)
                 await self.tree.sync(guild=guild)
             except Exception:
                 logging.exception("Falha ao sincronizar comandos em %s", guild.id)
@@ -865,12 +872,12 @@ class CerebrosoBot(commands.Bot):
             await interaction.response.defer(ephemeral=True)
             try:
                 tree.clear_commands()
+                for cmd in self._staff_commands:
+                    tree.add_command(cmd)
+                await tree.sync()
                 for guild in self.guilds:
                     tree.clear_commands(guild=guild)
-                    tree.add_command(self.pomodoro_group, guild=guild)
-                    tree.add_command(self.lembrete_group, guild=guild)
-                    tree.add_command(self.habito_group, guild=guild)
-                    tree.add_command(self.rotina_group, guild=guild)
+                    self._register_guild_commands(guild)
                     await tree.sync(guild=guild)
                 await interaction.followup.send("Comandos globais limpos e sincronizados por servidor.", ephemeral=True)
             except Exception:
@@ -889,10 +896,7 @@ class CerebrosoBot(commands.Bot):
                     await interaction.followup.send("Use em um servidor.", ephemeral=True)
                     return
                 self.tree.clear_commands(guild=guild)
-                self.tree.add_command(self.pomodoro_group, guild=guild)
-                self.tree.add_command(self.lembrete_group, guild=guild)
-                self.tree.add_command(self.habito_group, guild=guild)
-                self.tree.add_command(self.rotina_group, guild=guild)
+                self._register_guild_commands(guild)
                 await self.tree.sync(guild=guild)
                 await interaction.followup.send("Comandos re-sincronizados com sucesso!", ephemeral=True)
             except Exception:
@@ -908,6 +912,8 @@ class CerebrosoBot(commands.Bot):
             for cmd in self.tree.walk_commands():
                 entries.append(cmd.qualified_name)
             await interaction.response.send_message("Comandos registrados:\n" + "\n".join(entries), ephemeral=True)
+
+        self._staff_commands = [purge_global, syncfix, debugslash]
 
         self._register_pomodoro_commands()
         self._register_lembrete_commands()
