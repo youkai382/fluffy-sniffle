@@ -819,7 +819,10 @@ class CerebrosoBot(commands.Bot):
                 continue
             await self.confirmar_rotina(rotina["id"], payload.user_id)
 
-    def _rotina_autocomplete(self, current: str) -> List[app_commands.Choice[str]]:
+    async def _rotina_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        _ = interaction
         current_lower = current.lower()
         choices = []
         for rotina in self.store.data.get("global_habits", [])[:25]:
