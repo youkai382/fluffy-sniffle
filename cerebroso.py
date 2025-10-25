@@ -239,6 +239,10 @@ class CerebrosoBot(commands.Bot):
         self.lembrete_group = app_commands.Group(name="lembrete", description="Lembretes pessoais por DM")
         self.habito_group = app_commands.Group(name="habito", description="Hábitos pessoais")
         self.rotina_group = app_commands.Group(name="rotina", description="Rotinas da Comunidade")
+        self.rotina_admin_group = app_commands.Group(
+            name="rotinaadmin",
+            description="Administração das Rotinas da Comunidade",
+        )
 
         self._staff_commands: List[app_commands.Command] = []
 
@@ -264,6 +268,7 @@ class CerebrosoBot(commands.Bot):
         self.tree.add_command(self.lembrete_group, guild=guild)
         self.tree.add_command(self.habito_group, guild=guild)
         self.tree.add_command(self.rotina_group, guild=guild)
+        self.tree.add_command(self.rotina_admin_group, guild=guild)
 
     async def on_ready(self) -> None:
         logging.info("Conectado como %s", self.user)
@@ -858,9 +863,10 @@ class CerebrosoBot(commands.Bot):
                 "• /rotina entrar nome_ou_id:'Escovar os dentes' intervalo_minutos:90\n"
                 "• /rotina preferencias nome_ou_id:'Escovar os dentes' janela_inicio:08:00 janela_fim:22:00 dm:true\n"
                 "• /rotina leaderboard e /rotina leaderboard nome:'Escovar os dentes'"
-                "\nComandos de staff para conquistas:\n"
-                "• /rotina conquista_streak nome_ou_id:'Escovar os dentes' dias:7 cargo:@Cargo\n"
-                "• /rotina conquista_topmensal nome_ou_id:'Escovar os dentes' cargo:@Top"
+                "\nComandos de staff para rotinas:\n"
+                "• /rotinaadmin criar nome:'Escovar os dentes' canal:#rotina horarios:09:00,21:00\n"
+                "• /rotinaadmin conquista_streak nome_ou_id:'Escovar os dentes' dias:7 cargo:@Cargo\n"
+                "• /rotinaadmin conquista_topmensal nome_ou_id:'Escovar os dentes' cargo:@Top"
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -1188,13 +1194,10 @@ class CerebrosoBot(commands.Bot):
 
     def _register_rotina_commands(self) -> None:
         group = self.rotina_group
+        admin_group = self.rotina_admin_group
 
-        async def rotina_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
-            return self._rotina_autocomplete(current)
-
-        @group.command(name="criar", description="Cria uma rotina comunitária")
-        @app_commands.describe(nome="Nome da rotina", canal="Canal para anúncios", emoji="Emoji opcional", cargo="Cargo a marcar", horarios="Lista de horários HH:MM separados por vírgula")
-        async def criar(
+        @admin_group.command(name="criar", description="Cria uma rotina comunitária")
+        async def admin_criar(
             interaction: discord.Interaction,
             nome: str,
             canal: discord.TextChannel,
@@ -1229,8 +1232,10 @@ class CerebrosoBot(commands.Bot):
             await self.store.save_data()
             await interaction.response.send_message("Rotina criada!", ephemeral=True)
 
-        @group.command(name="listar", description="Lista rotinas comunitárias")
-        async def listar(interaction: discord.Interaction) -> None:
+        rotina_autocomplete = app_commands.autocomplete(nome_ou_id=self._rotina_autocomplete)
+
+        @admin_group.command(name="listar", description="Lista rotinas comunitárias")
+        async def admin_listar(interaction: discord.Interaction) -> None:
             if not has_manage_permission(interaction.user):
                 await interaction.response.send_message("Sem permissão.", ephemeral=True)
                 return
@@ -1262,9 +1267,9 @@ class CerebrosoBot(commands.Bot):
                 lines.append("Nenhuma rotina cadastrada.")
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
-        @group.command(name="pausar", description="Pausa uma rotina")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
-        async def pausar(interaction: discord.Interaction, nome_ou_id: str) -> None:
+        @admin_group.command(name="pausar", description="Pausa uma rotina")
+        @rotina_autocomplete
+        async def admin_pausar(interaction: discord.Interaction, nome_ou_id: str) -> None:
             if not has_manage_permission(interaction.user):
                 await interaction.response.send_message("Sem permissão.", ephemeral=True)
                 return
@@ -1276,9 +1281,9 @@ class CerebrosoBot(commands.Bot):
             await self.store.save_data()
             await interaction.response.send_message("Rotina pausada.", ephemeral=True)
 
-        @group.command(name="retomar", description="Retoma uma rotina")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
-        async def retomar(interaction: discord.Interaction, nome_ou_id: str) -> None:
+        @admin_group.command(name="retomar", description="Retoma uma rotina")
+        @rotina_autocomplete
+        async def admin_retomar(interaction: discord.Interaction, nome_ou_id: str) -> None:
             if not has_manage_permission(interaction.user):
                 await interaction.response.send_message("Sem permissão.", ephemeral=True)
                 return
@@ -1290,9 +1295,9 @@ class CerebrosoBot(commands.Bot):
             await self.store.save_data()
             await interaction.response.send_message("Rotina retomada.", ephemeral=True)
 
-        @group.command(name="deletar", description="Remove uma rotina")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
-        async def deletar(interaction: discord.Interaction, nome_ou_id: str) -> None:
+        @admin_group.command(name="deletar", description="Remove uma rotina")
+        @rotina_autocomplete
+        async def admin_deletar(interaction: discord.Interaction, nome_ou_id: str) -> None:
             if not has_manage_permission(interaction.user):
                 await interaction.response.send_message("Sem permissão.", ephemeral=True)
                 return
@@ -1304,9 +1309,9 @@ class CerebrosoBot(commands.Bot):
             await self.store.save_data()
             await interaction.response.send_message("Rotina deletada.", ephemeral=True)
 
-        @group.command(name="editar", description="Edita uma rotina")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
-        async def editar(
+        @admin_group.command(name="editar", description="Edita uma rotina")
+        @rotina_autocomplete
+        async def admin_editar(
             interaction: discord.Interaction,
             nome_ou_id: str,
             nome: Optional[str] = None,
@@ -1326,22 +1331,22 @@ class CerebrosoBot(commands.Bot):
                 rotina["name"] = nome
             if emoji:
                 rotina["emoji"] = emoji
-            if cargo:
+            if cargo is not None:
                 rotina["role_id"] = cargo.id
-            if canal:
+            if canal is not None:
                 rotina["channel_id"] = canal.id
-            if horarios:
+            if horarios is not None:
                 times = hhmm_list_from_csv(horarios)
-                if not times:
+                if times is None:
                     await interaction.response.send_message("Horários inválidos.", ephemeral=True)
                     return
                 rotina["times"] = times
             await self.store.save_data()
             await interaction.response.send_message("Rotina atualizada.", ephemeral=True)
 
-        @group.command(name="conquista_streak", description="Configura cargo por streak")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
-        async def conquista_streak(
+        @admin_group.command(name="conquista_streak", description="Configura cargo por streak")
+        @rotina_autocomplete
+        async def admin_conquista_streak(
             interaction: discord.Interaction,
             nome_ou_id: str,
             dias: int,
@@ -1374,9 +1379,9 @@ class CerebrosoBot(commands.Bot):
             )
             self.loop.create_task(self._process_rotina_achievements_and_save(rotina, interaction.user.id))
 
-        @group.command(name="conquista_streak_remover", description="Remove cargo de streak")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
-        async def conquista_streak_remover(
+        @admin_group.command(name="conquista_streak_remover", description="Remove cargo de streak")
+        @rotina_autocomplete
+        async def admin_conquista_streak_remover(
             interaction: discord.Interaction,
             nome_ou_id: str,
             dias: int,
@@ -1398,9 +1403,9 @@ class CerebrosoBot(commands.Bot):
             await self.store.save_data()
             await interaction.response.send_message("Cargo removido das conquistas de streak.", ephemeral=True)
 
-        @group.command(name="conquista_topmensal", description="Configura cargo para o top mensal")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
-        async def conquista_topmensal(
+        @admin_group.command(name="conquista_topmensal", description="Configura cargo para o top mensal")
+        @rotina_autocomplete
+        async def admin_conquista_topmensal(
             interaction: discord.Interaction,
             nome_ou_id: str,
             cargo: discord.Role,
@@ -1421,9 +1426,9 @@ class CerebrosoBot(commands.Bot):
             await interaction.response.send_message("Cargo configurado para o top mensal.", ephemeral=True)
             self.loop.create_task(self._process_rotina_achievements_and_save(rotina, interaction.user.id))
 
-        @group.command(name="conquista_topmensal_remover", description="Remove o cargo de top mensal")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
-        async def conquista_topmensal_remover(
+        @admin_group.command(name="conquista_topmensal_remover", description="Remove o cargo de top mensal")
+        @rotina_autocomplete
+        async def admin_conquista_topmensal_remover(
             interaction: discord.Interaction,
             nome_ou_id: str,
         ) -> None:
@@ -1447,7 +1452,7 @@ class CerebrosoBot(commands.Bot):
                 self.loop.create_task(self._remove_rotina_role(rotina, role_id, winner_id))
 
         @group.command(name="entrar", description="Participa de uma rotina")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
+        @rotina_autocomplete
         async def entrar(
             interaction: discord.Interaction,
             nome_ou_id: str,
@@ -1468,7 +1473,7 @@ class CerebrosoBot(commands.Bot):
             await interaction.response.send_message("Inscrição registrada!", ephemeral=True)
 
         @group.command(name="sair", description="Remove sua participação")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
+        @rotina_autocomplete
         async def sair(interaction: discord.Interaction, nome_ou_id: str) -> None:
             rotina = self._find_rotina(nome_ou_id)
             if not rotina:
@@ -1482,7 +1487,7 @@ class CerebrosoBot(commands.Bot):
                 await interaction.response.send_message("Você não estava inscrito.", ephemeral=True)
 
         @group.command(name="preferencias", description="Atualiza preferências da rotina")
-        @app_commands.autocomplete(nome_ou_id=rotina_autocomplete)
+        @rotina_autocomplete
         async def preferencias(
             interaction: discord.Interaction,
             nome_ou_id: str,

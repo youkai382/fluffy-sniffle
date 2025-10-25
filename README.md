@@ -66,15 +66,15 @@ Use `/cerebroso` para ver uma visão geral diretamente no Discord com exemplos r
 ### Pomodoro
 - `/pomodoro set foco:<min> pausa_curta:<min> pausa_longa:<min> ciclos:<int>`: ajusta a configuração padrão de um canal.
 
-### Rotinas da comunidade
-- `/rotina criar nome:<str> canal:<#canal> emoji:<emoji?> cargo:<cargo?> horarios:<HH:MM,...>`: cria uma rotina.
-- `/rotina listar`: mostra todas as rotinas com status e cargos de conquistas.
-- `/rotina pausar`, `/rotina retomar`, `/rotina deletar`: controle completo sobre as rotinas.
-- `/rotina editar`: atualize nome, emoji, cargo, canal ou horários.
-- `/rotina conquista_streak nome_ou_id:<rotina> dias:<n> cargo:<cargo>`: define o cargo entregue a quem atingir `n` dias consecutivos.
-- `/rotina conquista_streak_remover nome_ou_id:<rotina>`: remove o cargo de streak configurado.
-- `/rotina conquista_topmensal nome_ou_id:<rotina> cargo:<cargo>`: define o cargo de campeão do mês.
-- `/rotina conquista_topmensal_remover nome_ou_id:<rotina>`: remove o cargo do top mensal.
+### Rotinas da comunidade (staff)
+- `/rotinaadmin criar nome:<str> canal:<#canal> emoji:<emoji?> cargo:<cargo?> horarios:<HH:MM,...>`: cria uma rotina.
+- `/rotinaadmin listar`: mostra todas as rotinas com status e cargos de conquistas.
+- `/rotinaadmin pausar`, `/rotinaadmin retomar`, `/rotinaadmin deletar`: controle completo sobre as rotinas.
+- `/rotinaadmin editar`: atualize nome, emoji, cargo, canal ou horários.
+- `/rotinaadmin conquista_streak nome_ou_id:<rotina> dias:<n> cargo:<cargo>`: define o cargo entregue a quem atingir `n` dias consecutivos.
+- `/rotinaadmin conquista_streak_remover nome_ou_id:<rotina>`: remove o cargo de streak configurado.
+- `/rotinaadmin conquista_topmensal nome_ou_id:<rotina> cargo:<cargo>`: define o cargo de campeão do mês.
+- `/rotinaadmin conquista_topmensal_remover nome_ou_id:<rotina>`: remove o cargo do top mensal.
 
 ### Manutenção e boas práticas
 - Revise o arquivo `data/pomodoro_state.json` periodicamente para backups.
