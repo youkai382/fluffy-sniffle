@@ -1034,6 +1034,7 @@ class CerebrosoBot(commands.Bot):
                 name="🌼 Rotinas da Comunidade — cuidando juntinhos",
                 value=(
                     "Rotinas compartilhadas aparecem no canal do dia com um botão **Fiz!** ✨\n"
+                    "`/rotina listar` — veja as rotinas disponíveis\n"
                     "`/rotina entrar nome:'Escovar os dentes' intervalo_minutos:90 dm:true`\n"
                     "`/rotina preferencias nome:'Escovar os dentes' janela_inicio:08:00 janela_fim:22:00`\n"
                     "`/rotina leaderboard` — ranking geral\n"
@@ -1718,6 +1719,53 @@ class CerebrosoBot(commands.Bot):
             await interaction.response.send_message("Cargo de top mensal removido.", ephemeral=True)
             if role_id:
                 self.loop.create_task(self._remove_rotina_role(rotina, role_id, winner_id))
+
+        @group.command(name="listar", description="Mostra as rotinas disponíveis")
+        async def listar(interaction: discord.Interaction) -> None:
+            embed = discord.Embed(
+                title="Rotinas disponíveis",
+                colour=discord.Colour.green(),
+            )
+            tz = self.resolve_timezone(guild_id=interaction.guild_id)
+            tz_label = getattr(tz, "key", None) or tz.tzname(datetime.now(tz)) or "UTC"
+            count = 0
+            for rotina in self.store.data.get("global_habits", []):
+                if not rotina.get("active", True):
+                    continue
+                channel_id = rotina.get("channel_id")
+                channel_mention = "Canal não definido"
+                channel = None
+                if channel_id:
+                    channel = self.get_channel(channel_id)
+                    if channel is None and interaction.guild:
+                        channel = interaction.guild.get_channel(channel_id)
+                    channel_guild = getattr(channel, "guild", None)
+                    if (
+                        channel_guild
+                        and interaction.guild
+                        and channel_guild.id != interaction.guild.id
+                    ):
+                        continue
+                    channel_mention = channel.mention if channel else f"<#{channel_id}>"
+                times_list = rotina.get("times", [])
+                times_text = ", ".join(times_list) if times_list else "Horários não definidos"
+                emoji = rotina.get("emoji") or "✅"
+                name = rotina.get("name", "Rotina")
+                embed.add_field(
+                    name=f"{emoji} {discord.utils.escape_markdown(name)}",
+                    value=(
+                        f"Canal: {channel_mention}\n"
+                        f"Horários: {times_text}\n"
+                        "Use `/rotina entrar` e escolha pelo nome para participar."
+                    ),
+                    inline=False,
+                )
+                count += 1
+            if count == 0:
+                embed.description = "Nenhuma rotina ativa disponível no momento."
+            else:
+                embed.set_footer(text=f"Horários exibidos em {tz_label}")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
         @group.command(name="entrar", description="Participa de uma rotina")
         @rotina_autocomplete

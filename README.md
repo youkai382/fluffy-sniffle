@@ -40,6 +40,7 @@ Use `/cerebroso` para ver uma visão geral diretamente no Discord com exemplos r
 
 ### Rotinas da comunidade (`/rotina`)
 - `/rotina entrar nome_ou_id:"Escovar os dentes" intervalo_minutos:90 dm:true`: entra em uma rotina com lembretes por DM.
+- `/rotina listar`: veja todas as rotinas ativas com horários e canal.
 - `/rotina preferencias nome_ou_id:<rotina> intervalo_minutos:<n> dm:<true/false> janela_inicio:<HH:MM> janela_fim:<HH:MM>`: personalize frequência e janelas quietas.
 - `/rotina sair`: abandone a rotina quando quiser.
 - `/rotina meus`: lista todas as rotinas nas quais você está inscrito.
