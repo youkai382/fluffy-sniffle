@@ -988,25 +988,78 @@ class CerebrosoBot(commands.Bot):
 
         @tree.command(name="cerebroso", description="Ajuda geral do Cerebroso")
         async def cerebroso_help(interaction: discord.Interaction) -> None:
-            embed = discord.Embed(title="Cerebroso — Lembretes e Pomodoro", colour=discord.Colour.purple())
-            embed.description = (
-                "Seu assistente de foco, lembretes e hábitos!\n"
-                "Comandos principais:\n"
-                "• /pomodoro iniciar, /pomodoro status, /pomodoro set\n"
-                "• /lembrete criar texto:'Beber água' quando:'+45m'\n"
-                "• /habito criar nome:'Água' meta:8 intervalo_minutos:60 emoji:'💧'\n"
-                "• /rotina entrar nome_ou_id:'Escovar os dentes' intervalo_minutos:90\n"
-                "• /rotina preferencias nome_ou_id:'Escovar os dentes' janela_inicio:08:00 janela_fim:22:00 dm:true\n"
-                "• /rotina leaderboard e /rotina leaderboard nome:'Escovar os dentes'"
-                "\nConfigurações de fuso:\n"
-                "• /lembrete timezone fuso:'America/Sao_Paulo'\n"
-                "• /config timezone fuso:'America/Sao_Paulo'"
-                "\nComandos de staff para rotinas:\n"
-                "• /rotinaadmin criar nome:'Escovar os dentes' canal:#rotina horarios:09:00,21:00\n"
-                "• /rotinaadmin conquista_streak nome_ou_id:'Escovar os dentes' dias:7 cargo:@Cargo\n"
-                "• /rotinaadmin conquista_topmensal nome_ou_id:'Escovar os dentes' cargo:@Top"
+            embed = discord.Embed(
+                title="🧠✨ Cerebroso — seu companheiro de foco e autocuidado!",
+                description=(
+                    "O Cerebroso é o bot do Ninho que te ajuda a **criar hábitos saudáveis**, "
+                    "**lembrar de cuidar de si** e **manter o foco** — tudo de um jeitinho leve e acolhedor 💛\n\n"
+                    "Use **`/cerebroso`** pra ver o guia completo direto no Discord."
+                ),
+                color=discord.Color.blurple(),
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+            embed.add_field(
+                name="🍅 Pomodoro de Canal — modo foco em grupo",
+                value=(
+                    "Precisa de companhia pra se concentrar?\n"
+                    "O comando `/pomodoro iniciar` abre uma sessão de foco no canal.\n"
+                    "Você pode **participar**, **pausar** ou **ver o status** da sessão.\n\n"
+                    "💡 Trabalhe em blocos de tempo, com pausas entre eles — perfeito pra cérebro TDAH!"
+                ),
+                inline=False,
+            )
+
+            embed.add_field(
+                name="⏰ Lembretes pessoais — cuide de si no seu ritmo",
+                value=(
+                    "Receba lembretes por DM pra não esquecer do básico:\n"
+                    "`/lembrete criar texto:'Beber água' quando:'+45m'`\n"
+                    "`/lembrete listar` • `/lembrete cancelar id:1`\n\n"
+                    "🕒 Use tempos como `+10m`, `+2h` ou `18:00`. Ideal pra lembrar de pausas, remédios ou autocuidado."
+                ),
+                inline=False,
+            )
+
+            embed.add_field(
+                name="🌱 Hábitos pessoais — pequenas metas diárias",
+                value=(
+                    "Acompanhe seus hábitos com carinho!\n"
+                    "`/habito criar nome:'Água' meta:8 intervalo_minutos:60 emoji:'💧'`\n"
+                    "`/habito listar` • `/habito marcar id:1`\n\n"
+                    "💧 Cada vez que marcar, o Cerebroso te manda uma mensagem fofa de incentivo 🩷"
+                ),
+                inline=False,
+            )
+
+            embed.add_field(
+                name="🌼 Rotinas da Comunidade — cuidando juntinhos",
+                value=(
+                    "Rotinas compartilhadas aparecem no canal do dia com um botão **Fiz!** ✨\n"
+                    "`/rotina entrar nome:'Escovar os dentes' intervalo_minutos:90 dm:true`\n"
+                    "`/rotina preferencias nome:'Escovar os dentes' janela_inicio:08:00 janela_fim:22:00`\n"
+                    "`/rotina leaderboard` — ranking geral\n"
+                    "`/rotina leaderboard nome:'Escovar os dentes'` — ranking da rotina específica\n\n"
+                    "🎖️ Confirmar pausa seus lembretes até o dia seguinte. Cada check é uma conquista!"
+                ),
+                inline=False,
+            )
+
+            embed.add_field(
+                name="📚 Exemplos rápidos",
+                value=(
+                    "`/pomodoro iniciar`\n"
+                    "`/lembrete criar texto:'Alongar' quando:'18:00'`\n"
+                    "`/habito criar nome:'Leitura' meta:1 intervalo_minutos:120 emoji:'📚'`\n"
+                    "`/rotina entrar nome:'Escovar os dentes' intervalo_minutos:60 dm:true`"
+                ),
+                inline=False,
+            )
+
+            embed.set_footer(
+                text="🌿 O Cerebroso não cobra — ele te apoia. Cada passinho já é progresso 💛"
+            )
+
+            await interaction.response.send_message(embed=embed)
 
         self._general_commands = [cerebroso_help]
 
