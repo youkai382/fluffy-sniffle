@@ -245,6 +245,7 @@ class CerebrosoBot(commands.Bot):
         )
 
         self._staff_commands: List[app_commands.Command] = []
+        self._general_commands: List[app_commands.Command] = []
 
         self._register_commands()
 
@@ -263,6 +264,8 @@ class CerebrosoBot(commands.Bot):
 
     def _register_guild_commands(self, guild: discord.abc.Snowflake) -> None:
         for cmd in self._staff_commands:
+            self.tree.add_command(cmd, guild=guild)
+        for cmd in self._general_commands:
             self.tree.add_command(cmd, guild=guild)
         self.tree.add_command(self.pomodoro_group, guild=guild)
         self.tree.add_command(self.lembrete_group, guild=guild)
@@ -872,6 +875,8 @@ class CerebrosoBot(commands.Bot):
                 "• /rotinaadmin conquista_topmensal nome_ou_id:'Escovar os dentes' cargo:@Top"
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        self._general_commands = [cerebroso_help]
 
         @tree.command(name="purgeglobal", description="Limpa comandos globais e re-sincroniza")
         async def purge_global(interaction: discord.Interaction) -> None:
