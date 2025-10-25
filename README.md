@@ -93,10 +93,21 @@ Use `/cerebroso` para ver uma visão geral diretamente no Discord com exemplos r
 4. Depois do download (ou se o `doctor.py` emitir alerta), confirme se a primeira linha de `cerebroso.py` é `import asyncio`. Se aparecer mensagem HTML ou `429`, refaça o download antes de rodar.
 
 ### Erro `429: Too Many Requests`
-Esse erro significa que o servidor onde você baixou o arquivo bloqueou o acesso temporariamente, e o Python acabou lendo a página de aviso como se fosse código. A solução é:
-- aguardar alguns minutos e baixar novamente o arquivo **seguindo o passo a passo acima**;
-- usar `git clone`/ZIP, que baixam todos os arquivos de uma vez e evitam esse problema;
-- rodar `python doctor.py` depois do download: se ele acusar erro, apague o arquivo corrompido e repita o processo.
+Esse erro significa que o servidor onde você baixou o arquivo bloqueou o acesso temporariamente, e o Python acabou lendo a página de aviso como se fosse código. Os sintomas mais comuns são mensagens como:
+
+```
+File "cerebroso.py", line 1
+    429: Too Many Requests
+    ^^^
+SyntaxError: illegal target for annotation
+```
+
+ou até trechos de HTML no stacktrace, por exemplo `SyntaxError: invalid character '·' (U+00B7)` apontando para `<title>...`.
+
+Quando isso acontecer, siga estes passos:
+- aguarde alguns minutos e baixe novamente o arquivo **seguindo o passo a passo acima**;
+- use `git clone`/ZIP, que baixam todos os arquivos de uma vez e evitam esse problema;
+- rode `python doctor.py` depois do download: se ele acusar erro, apague o arquivo corrompido e repita o processo.
 
 Após baixar corretamente, rode `pip install -r requirements.txt` e inicie o bot com `python cerebroso.py`.
 
