@@ -6,6 +6,7 @@ import random
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Any, Dict, List, Optional, Tuple
 
 import discord
@@ -16,6 +17,9 @@ import config
 
 
 logging.basicConfig(level=logging.INFO)
+
+
+DEFAULT_TIMEZONE = "UTC"
 
 
 DATA_DIR = os.path.join("data")
@@ -38,8 +42,9 @@ def from_timestamp(ts: int) -> datetime:
     return datetime.fromtimestamp(ts, tz=timezone.utc)
 
 
-def today_key(offset: int = 0) -> str:
-    return (utcnow().date() + timedelta(days=offset)).isoformat()
+def today_key(offset: int = 0, tz: Optional[ZoneInfo] = None) -> str:
+    reference = datetime.now(tz or timezone.utc)
+    return (reference.date() + timedelta(days=offset)).isoformat()
 
 
 def parse_hhmm(text: str) -> Optional[Tuple[int, int]]:
@@ -54,9 +59,9 @@ def parse_hhmm(text: str) -> Optional[Tuple[int, int]]:
     return None
 
 
-def parse_datetime_option(text: str) -> Optional[int]:
+def parse_datetime_option(text: str, tz: ZoneInfo) -> Optional[int]:
     text = text.strip()
-    now = utcnow()
+    now = datetime.now(tz)
     if text.startswith("+"):
         number = text[1:-1]
         suffix = text[-1].lower()
@@ -72,11 +77,11 @@ def parse_datetime_option(text: str) -> Optional[int]:
             delta = timedelta(days=amount)
         else:
             return None
-        return to_timestamp(now + delta)
+        return to_timestamp((now + delta).astimezone(timezone.utc))
     hhmm = parse_hhmm(text)
     if hhmm:
         hour, minute = hhmm
-        dt = now.astimezone().replace(hour=hour, minute=minute, second=0, microsecond=0)
+        dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if dt < now:
             dt += timedelta(days=1)
         return to_timestamp(dt.astimezone(timezone.utc))
@@ -84,8 +89,8 @@ def parse_datetime_option(text: str) -> Optional[int]:
         date_part, time_part = text.split()
         year, month, day = map(int, date_part.split("-"))
         hour, minute = map(int, time_part.split(":"))
-        dt = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
-        return to_timestamp(dt)
+        dt = datetime(year, month, day, hour, minute, tzinfo=tz)
+        return to_timestamp(dt.astimezone(timezone.utc))
     except Exception:
         return None
 
@@ -137,6 +142,11 @@ def default_state() -> Dict[str, Any]:
         "habits": [],
         "global_habits": [],
         "_next_ids": {"reminder": 1, "habit": 1, "global_habit": 1},
+        "settings": {
+            "default_timezone": DEFAULT_TIMEZONE,
+            "guild_timezones": {},
+            "user_timezones": {},
+        },
     }
 
 
@@ -168,6 +178,16 @@ class JsonStore:
         for key in base.keys():
             base[key] = loaded.get(key, base[key])
         base.setdefault("_next_ids", {}).update(loaded.get("_next_ids", {}))
+        if isinstance(loaded.get("settings"), dict):
+            base_settings = base.setdefault("settings", {})
+            loaded_settings = loaded.get("settings", {})
+            base_settings["default_timezone"] = loaded_settings.get(
+                "default_timezone", base_settings.get("default_timezone", DEFAULT_TIMEZONE)
+            )
+            if isinstance(loaded_settings.get("guild_timezones"), dict):
+                base_settings.setdefault("guild_timezones", {}).update(loaded_settings.get("guild_timezones", {}))
+            if isinstance(loaded_settings.get("user_timezones"), dict):
+                base_settings.setdefault("user_timezones", {}).update(loaded_settings.get("user_timezones", {}))
         return base
 
     async def save(self) -> None:
@@ -220,7 +240,12 @@ class RotinaButton(discord.ui.View):
 
     @discord.ui.button(label="Fiz!", style=discord.ButtonStyle.primary, custom_id="rotina_fiz")
     async def fiz(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
-        await self.bot.confirmar_rotina(self.rotina_id, interaction.user.id, self.date_key)
+        await self.bot.confirmar_rotina(
+            self.rotina_id,
+            interaction.user.id,
+            self.date_key,
+            guild_id=interaction.guild_id,
+        )
         await interaction.response.send_message(random.choice(CUTE_MESSAGES), ephemeral=True)
 
 
@@ -243,6 +268,7 @@ class CerebrosoBot(commands.Bot):
             name="rotinaadmin",
             description="Administração das Rotinas da Comunidade",
         )
+        self.config_group = app_commands.Group(name="config", description="Configurações do Cerebroso")
 
         self._staff_commands: List[app_commands.Command] = []
         self._general_commands: List[app_commands.Command] = []
@@ -262,6 +288,51 @@ class CerebrosoBot(commands.Bot):
             task.cancel()
         await super().close()
 
+    def _settings(self) -> Dict[str, Any]:
+        settings = self.store.data.setdefault("settings", {})
+        settings.setdefault("default_timezone", DEFAULT_TIMEZONE)
+        settings.setdefault("guild_timezones", {})
+        settings.setdefault("user_timezones", {})
+        return settings
+
+    def set_guild_timezone(self, guild_id: int, tz_name: str) -> None:
+        settings = self._settings()
+        settings.setdefault("guild_timezones", {})[str(guild_id)] = tz_name
+
+    def clear_guild_timezone(self, guild_id: int) -> None:
+        settings = self._settings()
+        settings.setdefault("guild_timezones", {}).pop(str(guild_id), None)
+
+    def set_user_timezone(self, user_id: int, tz_name: str) -> None:
+        settings = self._settings()
+        settings.setdefault("user_timezones", {})[str(user_id)] = tz_name
+
+    def clear_user_timezone(self, user_id: int) -> None:
+        settings = self._settings()
+        settings.setdefault("user_timezones", {}).pop(str(user_id), None)
+
+    def get_timezone_name(
+        self, *, guild_id: Optional[int] = None, user_id: Optional[int] = None
+    ) -> str:
+        settings = self._settings()
+        if user_id is not None:
+            tz_name = settings.get("user_timezones", {}).get(str(user_id))
+            if tz_name:
+                return tz_name
+        if guild_id is not None:
+            tz_name = settings.get("guild_timezones", {}).get(str(guild_id))
+            if tz_name:
+                return tz_name
+        return settings.get("default_timezone", DEFAULT_TIMEZONE)
+
+    def resolve_timezone(self, *, guild_id: Optional[int] = None, user_id: Optional[int] = None) -> ZoneInfo:
+        tz_name = self.get_timezone_name(guild_id=guild_id, user_id=user_id)
+        try:
+            return ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            logging.warning("Fuso horário inválido armazenado: %s. Revertendo para UTC.", tz_name)
+            return ZoneInfo(DEFAULT_TIMEZONE)
+
     def _register_guild_commands(self, guild: discord.abc.Snowflake) -> None:
         for cmd in self._staff_commands:
             self.tree.add_command(cmd, guild=guild)
@@ -272,6 +343,7 @@ class CerebrosoBot(commands.Bot):
         self.tree.add_command(self.habito_group, guild=guild)
         self.tree.add_command(self.rotina_group, guild=guild)
         self.tree.add_command(self.rotina_admin_group, guild=guild)
+        self.tree.add_command(self.config_group, guild=guild)
 
     async def on_ready(self) -> None:
         logging.info("Conectado como %s", self.user)
@@ -344,9 +416,12 @@ class CerebrosoBot(commands.Bot):
                 for habit in self.store.data.get("habits", []):
                     if not habit.get("active", True):
                         continue
+                    channel = self.get_channel(habit.get("channel_id"))
+                    guild_id = channel.guild.id if isinstance(channel, discord.TextChannel) else None
+                    tz = self.resolve_timezone(guild_id=guild_id, user_id=habit.get("user_id"))
                     goal = max(1, int(habit.get("goal_per_day", 1)))
                     progress = habit.setdefault("progress", {})
-                    today = today_key()
+                    today = today_key(tz=tz)
                     done_today = progress.get(today, 0)
                     next_ts = habit.get("next_ts", 0)
                     interval_min = max(5, int(habit.get("interval_min", habit.get("interval_min", 60))))
@@ -354,7 +429,6 @@ class CerebrosoBot(commands.Bot):
                         continue
                     if next_ts and next_ts > now_ts:
                         continue
-                    channel = self.get_channel(habit.get("channel_id"))
                     if isinstance(channel, discord.TextChannel):
                         try:
                             guild = channel.guild
@@ -379,23 +453,25 @@ class CerebrosoBot(commands.Bot):
         await self.wait_until_ready()
         while not self.is_closed():
             try:
-                now = utcnow()
-                today = today_key()
+                now_utc = utcnow()
                 for rotina in self.store.data.get("global_habits", []):
                     if not rotina.get("active", True):
                         continue
+                    channel = self.get_channel(rotina.get("channel_id"))
+                    if not isinstance(channel, discord.TextChannel):
+                        continue
+                    tz = self.resolve_timezone(guild_id=channel.guild.id)
+                    today = today_key(tz=tz)
+                    now_local = now_utc.astimezone(tz)
                     times = rotina.get("times", ["20:00"])
                     for entry in times:
                         hhmm = parse_hhmm(entry)
                         if not hhmm:
                             continue
                         hour, minute = hhmm
-                        if now.hour == hour and now.minute == minute:
+                        if now_local.hour == hour and now_local.minute == minute:
                             ann = rotina.setdefault("announcements", {})
                             if today in ann:
-                                continue
-                            channel = self.get_channel(rotina.get("channel_id"))
-                            if not isinstance(channel, discord.TextChannel):
                                 continue
                             emoji = rotina.get("emoji", "✅")
                             view = RotinaButton(self, rotina["id"], today, emoji)
@@ -410,7 +486,7 @@ class CerebrosoBot(commands.Bot):
                                     await message.add_reaction(emoji)
                                 except Exception:
                                     pass
-                                ann[today] = {"message_id": message.id, "ts": to_timestamp(now)}
+                                ann[today] = {"message_id": message.id, "ts": to_timestamp(now_utc)}
                                 await self.store.save_data()
                             except Exception:
                                 logging.exception("Erro ao anunciar rotina %s", rotina["name"])
@@ -425,10 +501,13 @@ class CerebrosoBot(commands.Bot):
         while not self.is_closed():
             try:
                 now_ts = int(time.time())
-                today = today_key()
                 for rotina in self.store.data.get("global_habits", []):
                     if not rotina.get("active", True):
                         continue
+                    channel = self.get_channel(rotina.get("channel_id"))
+                    guild_id = channel.guild.id if isinstance(channel, discord.TextChannel) else None
+                    tz = self.resolve_timezone(guild_id=guild_id)
+                    today = today_key(tz=tz)
                     confirmations = rotina.setdefault("confirmations", {}).setdefault(today, {})
                     enrollments = rotina.get("enrollments", {})
                     emoji = rotina.get("emoji", "✅")
@@ -443,7 +522,7 @@ class CerebrosoBot(commands.Bot):
                         if next_ts and next_ts > now_ts:
                             continue
                         quiet = prefs.get("quiet", {"start": "06:00", "end": "23:00"})
-                        if not self._is_within_window(now_ts, quiet.get("start"), quiet.get("end")):
+                        if not self._is_within_window(now_ts, quiet.get("start"), quiet.get("end"), tz):
                             continue
                         user = self.get_user(user_id) or await self.fetch_user_safe(user_id)
                         if not user:
@@ -474,14 +553,16 @@ class CerebrosoBot(commands.Bot):
         except Exception:
             return None
 
-    def _is_within_window(self, ts: int, start: Optional[str], end: Optional[str]) -> bool:
+    def _is_within_window(
+        self, ts: int, start: Optional[str], end: Optional[str], tz: ZoneInfo
+    ) -> bool:
         if not start or not end:
             return True
         hhmm_start = parse_hhmm(start)
         hhmm_end = parse_hhmm(end)
         if not hhmm_start or not hhmm_end:
             return True
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(tz)
         minutes_now = dt.hour * 60 + dt.minute
         start_min = hhmm_start[0] * 60 + hhmm_start[1]
         end_min = hhmm_end[0] * 60 + hhmm_end[1]
@@ -533,7 +614,10 @@ class CerebrosoBot(commands.Bot):
 
     def _rotina_user_streak(self, rotina: Dict[str, Any], user_id: int) -> int:
         confirmations = rotina.get("confirmations", {})
-        day = utcnow().date()
+        channel = self.get_channel(rotina.get("channel_id"))
+        guild_id = channel.guild.id if isinstance(channel, discord.TextChannel) else None
+        tz = self.resolve_timezone(guild_id=guild_id)
+        day = datetime.now(tz).date()
         streak = 0
         while True:
             key = day.isoformat()
@@ -635,7 +719,8 @@ class CerebrosoBot(commands.Bot):
         role = guild.get_role(role_id)
         if not role:
             return changed
-        month_key = utcnow().strftime("%Y-%m")
+        tz = self.resolve_timezone(guild_id=guild.id)
+        month_key = datetime.now(tz).strftime("%Y-%m")
         counts = self._rotina_monthly_counts(rotina, month_key)
         previous_month = monthly.get("month")
         previous_winner = monthly.get("winner_id")
@@ -681,11 +766,22 @@ class CerebrosoBot(commands.Bot):
 
         return changed
 
-    async def confirmar_rotina(self, rotina_id: int, user_id: int, date_key: Optional[str] = None) -> None:
-        date_key = date_key or today_key()
+    async def confirmar_rotina(
+        self,
+        rotina_id: int,
+        user_id: int,
+        date_key: Optional[str] = None,
+        guild_id: Optional[int] = None,
+    ) -> None:
         for rotina in self.store.data.get("global_habits", []):
             if rotina.get("id") == rotina_id:
-                confirmations = rotina.setdefault("confirmations", {}).setdefault(date_key, {})
+                resolved_date = date_key
+                if resolved_date is None:
+                    channel = self.get_channel(rotina.get("channel_id"))
+                    resolved_guild_id = guild_id or (channel.guild.id if isinstance(channel, discord.TextChannel) else None)
+                    tz = self.resolve_timezone(guild_id=resolved_guild_id)
+                    resolved_date = today_key(tz=tz)
+                confirmations = rotina.setdefault("confirmations", {}).setdefault(resolved_date, {})
                 confirmations[str(user_id)] = True
                 enroll = rotina.setdefault("enrollments", {})
                 prefs = enroll.get(str(user_id))
@@ -797,12 +893,14 @@ class CerebrosoBot(commands.Bot):
                 if habit.get("user_id") != payload.user_id:
                     continue
                 progress = habit.setdefault("progress", {})
-                today = today_key()
+                channel = self.get_channel(habit.get("channel_id"))
+                guild_id = channel.guild.id if isinstance(channel, discord.TextChannel) else payload.guild_id
+                tz = self.resolve_timezone(guild_id=guild_id, user_id=payload.user_id)
+                today = today_key(tz=tz)
                 progress[today] = progress.get(today, 0) + 1
                 if progress[today] >= habit.get("goal_per_day", 1):
                     habit["next_ts"] = int(time.time()) + 3600
                 await self.store.save_data()
-                channel = self.get_channel(habit.get("channel_id"))
                 if isinstance(channel, discord.TextChannel):
                     try:
                         await channel.send(random.choice(CUTE_MESSAGES))
@@ -811,7 +909,8 @@ class CerebrosoBot(commands.Bot):
                 break
 
     async def _handle_rotina_reaction(self, payload: discord.RawReactionActionEvent) -> None:
-        today = today_key()
+        tz = self.resolve_timezone(guild_id=payload.guild_id)
+        today = today_key(tz=tz)
         for rotina in self.store.data.get("global_habits", []):
             ann = rotina.get("announcements", {}).get(today)
             if not ann:
@@ -820,7 +919,7 @@ class CerebrosoBot(commands.Bot):
                 continue
             if str(payload.emoji) != rotina.get("emoji", "✅"):
                 continue
-            await self.confirmar_rotina(rotina["id"], payload.user_id)
+            await self.confirmar_rotina(rotina["id"], payload.user_id, guild_id=payload.guild_id)
 
     async def _rotina_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -869,6 +968,9 @@ class CerebrosoBot(commands.Bot):
                 "• /rotina entrar nome_ou_id:'Escovar os dentes' intervalo_minutos:90\n"
                 "• /rotina preferencias nome_ou_id:'Escovar os dentes' janela_inicio:08:00 janela_fim:22:00 dm:true\n"
                 "• /rotina leaderboard e /rotina leaderboard nome:'Escovar os dentes'"
+                "\nConfigurações de fuso:\n"
+                "• /lembrete timezone fuso:'America/Sao_Paulo'\n"
+                "• /config timezone fuso:'America/Sao_Paulo'"
                 "\nComandos de staff para rotinas:\n"
                 "• /rotinaadmin criar nome:'Escovar os dentes' canal:#rotina horarios:09:00,21:00\n"
                 "• /rotinaadmin conquista_streak nome_ou_id:'Escovar os dentes' dias:7 cargo:@Cargo\n"
@@ -877,6 +979,46 @@ class CerebrosoBot(commands.Bot):
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
         self._general_commands = [cerebroso_help]
+
+        config_group = self.config_group
+
+        @config_group.command(name="timezone", description="Define o fuso horário padrão da guilda")
+        @app_commands.describe(fuso="Ex.: America/Sao_Paulo", limpar="Voltar ao padrão (UTC)")
+        async def config_timezone(
+            interaction: discord.Interaction,
+            fuso: Optional[str] = None,
+            limpar: Optional[bool] = False,
+        ) -> None:
+            if not has_manage_permission(interaction.user):
+                await interaction.response.send_message("Sem permissão para configurar.", ephemeral=True)
+                return
+            if interaction.guild is None:
+                await interaction.response.send_message("Use este comando em um servidor.", ephemeral=True)
+                return
+            if limpar:
+                self.clear_guild_timezone(interaction.guild.id)
+                await self.store.save_data()
+                current = self.get_timezone_name(guild_id=interaction.guild.id)
+                await interaction.response.send_message(
+                    f"Fuso horário restaurado para {current}.", ephemeral=True
+                )
+                return
+            if not fuso:
+                current = self.get_timezone_name(guild_id=interaction.guild.id)
+                await interaction.response.send_message(
+                    f"Fuso horário atual: **{current}**. Informe `fuso` para alterar.", ephemeral=True
+                )
+                return
+            try:
+                ZoneInfo(fuso)
+            except ZoneInfoNotFoundError:
+                await interaction.response.send_message("Fuso horário inválido.", ephemeral=True)
+                return
+            self.set_guild_timezone(interaction.guild.id, fuso)
+            await self.store.save_data()
+            await interaction.response.send_message(
+                f"Fuso horário da guilda atualizado para **{fuso}**.", ephemeral=True
+            )
 
         @tree.command(name="purgeglobal", description="Limpa comandos globais e re-sincroniza")
         async def purge_global(interaction: discord.Interaction) -> None:
@@ -1050,7 +1192,8 @@ class CerebrosoBot(commands.Bot):
         @group.command(name="criar", description="Cria um lembrete pessoal")
         @app_commands.describe(texto="Texto do lembrete", quando="Quando enviar")
         async def criar(interaction: discord.Interaction, texto: str, quando: str) -> None:
-            ts = parse_datetime_option(quando)
+            tz = self.resolve_timezone(guild_id=interaction.guild_id, user_id=interaction.user.id)
+            ts = parse_datetime_option(quando, tz)
             if ts is None:
                 await interaction.response.send_message("Formato de data inválido.", ephemeral=True)
                 return
@@ -1088,6 +1231,38 @@ class CerebrosoBot(commands.Bot):
                     return
             await interaction.response.send_message("Lembrete não encontrado.", ephemeral=True)
 
+        @group.command(name="timezone", description="Define seu fuso horário pessoal")
+        @app_commands.describe(fuso="Ex.: America/Sao_Paulo", limpar="Voltar ao padrão do servidor")
+        async def timezone_cmd(
+            interaction: discord.Interaction,
+            fuso: Optional[str] = None,
+            limpar: Optional[bool] = False,
+        ) -> None:
+            if limpar:
+                self.clear_user_timezone(interaction.user.id)
+                await self.store.save_data()
+                resolved = self.get_timezone_name(guild_id=interaction.guild_id, user_id=interaction.user.id)
+                await interaction.response.send_message(
+                    f"Fuso horário pessoal removido. Usando agora: **{resolved}**.", ephemeral=True
+                )
+                return
+            if not fuso:
+                current = self.get_timezone_name(guild_id=interaction.guild_id, user_id=interaction.user.id)
+                await interaction.response.send_message(
+                    f"Fuso horário atual considerado: **{current}**. Informe `fuso` para alterar.", ephemeral=True
+                )
+                return
+            try:
+                ZoneInfo(fuso)
+            except ZoneInfoNotFoundError:
+                await interaction.response.send_message("Fuso horário inválido.", ephemeral=True)
+                return
+            self.set_user_timezone(interaction.user.id, fuso)
+            await self.store.save_data()
+            await interaction.response.send_message(
+                f"Fuso horário pessoal atualizado para **{fuso}**.", ephemeral=True
+            )
+
     def _register_habito_commands(self) -> None:
         group = self.habito_group
 
@@ -1124,7 +1299,8 @@ class CerebrosoBot(commands.Bot):
 
         @group.command(name="listar", description="Lista seus hábitos")
         async def listar(interaction: discord.Interaction) -> None:
-            today = today_key()
+            tz = self.resolve_timezone(guild_id=interaction.guild_id, user_id=interaction.user.id)
+            today = today_key(tz=tz)
             lines = []
             for habit in self.store.data.get("habits", []):
                 if habit.get("user_id") != interaction.user.id:
@@ -1186,7 +1362,8 @@ class CerebrosoBot(commands.Bot):
             for habit in self.store.data.get("habits", []):
                 if habit.get("id") == id and habit.get("user_id") == interaction.user.id:
                     progress = habit.setdefault("progress", {})
-                    today = today_key()
+                    tz = self.resolve_timezone(guild_id=interaction.guild_id, user_id=interaction.user.id)
+                    today = today_key(tz=tz)
                     progress[today] = progress.get(today, 0) + quantidade
                     await self.store.save_data()
                     await interaction.response.send_message("Progresso registrado!", ephemeral=True)

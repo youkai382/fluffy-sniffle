@@ -29,6 +29,7 @@ Use `/cerebroso` para ver uma visão geral diretamente no Discord com exemplos r
 - `/lembrete criar texto:"Beber água" quando:"+45m"`: agende usando atalhos (+10m, +2h, +1d) ou horários completos (`HH:MM`, `YYYY-MM-DD HH:MM`).
 - `/lembrete listar`: veja seus próximos lembretes (máx. 10).
 - `/lembrete cancelar id:<n>`: cancele um lembrete específico.
+- `/lembrete timezone fuso:"America/Sao_Paulo"`: define o seu fuso horário pessoal (use `limpar:true` para voltar ao padrão do servidor).
 
 ### Hábitos pessoais (`/habito`)
 - `/habito criar nome:"Água" meta:8 intervalo_minutos:60 emoji:"💧"`: define a meta diária, intervalo de lembrete e o emoji usado nas confirmações.
@@ -62,6 +63,7 @@ Use `/cerebroso` para ver uma visão geral diretamente no Discord com exemplos r
 - `/purgeglobal`: limpa quaisquer comandos globais duplicados e re-sincroniza todos os comandos do servidor atual.
 - `/syncfix`: força a ressincronização de comandos nesta guild.
 - `/debugslash`: lista no privado (ephemeral) todos os comandos carregados, útil para debug.
+- `/config timezone fuso:"America/Sao_Paulo"`: ajusta o fuso padrão do servidor (use `limpar:true` para retornar ao UTC).
 
 ### Pomodoro
 - `/pomodoro set foco:<min> pausa_curta:<min> pausa_longa:<min> ciclos:<int>`: ajusta a configuração padrão de um canal.
@@ -80,6 +82,7 @@ Use `/cerebroso` para ver uma visão geral diretamente no Discord com exemplos r
 - Revise o arquivo `data/pomodoro_state.json` periodicamente para backups.
 - Se algo parecer travado, reinicie o bot e use `/syncfix` para garantir que todos os comandos voltem a aparecer.
 - Lembrete: as mensagens de staff são sempre *ephemeral*, evitando flood no chat.
+- Oriente a comunidade a configurar o fuso horário correto (membros: `/lembrete timezone`; staff: `/config timezone`) para que os lembretes sigam a hora local.
 
 ---
 
