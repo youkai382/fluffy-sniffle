@@ -516,7 +516,9 @@ class CerebrosoBot(commands.Bot):
                     if not rotina.get("active", True):
                         continue
                     channel = self.get_channel(rotina.get("channel_id"))
-                    guild_id = channel.guild.id if isinstance(channel, discord.TextChannel) else None
+                    if not isinstance(channel, discord.TextChannel):
+                        continue
+                    guild_id = channel.guild.id
                     tz = self.resolve_timezone(guild_id=guild_id)
                     today = today_key(tz=tz)
                     confirmations = rotina.setdefault("confirmations", {}).setdefault(today, {})
@@ -524,11 +526,12 @@ class CerebrosoBot(commands.Bot):
                     emoji = rotina.get("emoji", "✅")
                     announcements = rotina.setdefault("announcements", {})
                     ann_info = announcements.get(today)
-                    jump_url = None
-                    if isinstance(channel, discord.TextChannel) and isinstance(ann_info, dict):
-                        message_id = ann_info.get("message_id")
-                        if message_id:
-                            jump_url = f"https://discord.com/channels/{channel.guild.id}/{channel.id}/{message_id}"
+                    if not isinstance(ann_info, dict):
+                        continue
+                    message_id = ann_info.get("message_id")
+                    if not message_id:
+                        continue
+                    jump_url = f"https://discord.com/channels/{channel.guild.id}/{channel.id}/{message_id}"
                     for user_id_str, prefs in enrollments.items():
                         user_id = int(user_id_str)
                         if not prefs.get("dm", True):
@@ -546,11 +549,7 @@ class CerebrosoBot(commands.Bot):
                         if not user:
                             continue
                         try:
-                            extra = (
-                                f"\n👉 Confirme aqui: {jump_url}"
-                                if jump_url
-                                else "\nO anúncio de hoje ainda não saiu – fique de olho no canal!"
-                            )
+                            extra = f"\n👉 Confirme aqui: {jump_url}"
                             await user.send(
                                 f"{emoji} Olá! Já fez a rotina **{rotina['name']}** hoje? Clique em 'Fiz!' ou reaja com {emoji} no anúncio do servidor.{extra}"
                             )
