@@ -871,7 +871,7 @@ class CerebrosoBot(commands.Bot):
                 return
             await interaction.response.defer(ephemeral=True)
             try:
-                tree.clear_commands()
+                tree.clear_commands(guild=None)
                 for cmd in self._staff_commands:
                     tree.add_command(cmd)
                 await tree.sync()
