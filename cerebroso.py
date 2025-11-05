@@ -147,6 +147,7 @@ def default_state() -> Dict[str, Any]:
             "guild_timezones": {},
             "user_timezones": {},
         },
+        "dm_status": {},
     }
 
 
@@ -333,6 +334,56 @@ class CerebrosoBot(commands.Bot):
             logging.warning("Fuso horário inválido armazenado: %s. Revertendo para UTC.", tz_name)
             return ZoneInfo(DEFAULT_TIMEZONE)
 
+    def _dm_status_entry(self, user_id: int) -> Dict[str, Any]:
+        status_map = self.store.data.setdefault("dm_status", {})
+        entry = status_map.get(str(user_id))
+        if not isinstance(entry, dict):
+            entry = {"blocked": False, "next_check": 0, "notified": {}}
+        else:
+            entry.setdefault("blocked", False)
+            entry.setdefault("next_check", 0)
+            entry.setdefault("notified", {})
+        status_map[str(user_id)] = entry
+        return entry
+
+    def _dm_blocked_until(self, user_id: int) -> int:
+        entry = self._dm_status_entry(user_id)
+        if entry.get("blocked"):
+            return int(entry.get("next_check", 0))
+        return 0
+
+    async def _mark_dm_success(self, user_id: int) -> None:
+        entry = self._dm_status_entry(user_id)
+        if entry.get("blocked"):
+            entry["blocked"] = False
+            entry["next_check"] = 0
+            entry["notified"] = {}
+            await self.store.save_data()
+
+    async def _handle_dm_blocked(
+        self,
+        user_id: int,
+        channel: Optional[discord.abc.Messageable],
+    ) -> None:
+        entry = self._dm_status_entry(user_id)
+        now_ts = int(time.time())
+        entry["blocked"] = True
+        entry["next_check"] = now_ts + 300
+        notified = entry.setdefault("notified", {})
+        if isinstance(channel, discord.TextChannel):
+            channel_key = str(channel.id)
+            last_notified = int(notified.get(channel_key, 0))
+            if now_ts - last_notified >= 300:
+                try:
+                    await channel.send(
+                        f"⚠️ <@{user_id}>, suas DMs estão fechadas; não consigo te mandar os lembretes das rotinas e hábitos! "
+                        "Assim que reabrir, volto a cuidar de você por aqui 💛"
+                    )
+                    notified[channel_key] = now_ts
+                except Exception:
+                    logging.exception("Falha ao avisar canal %s sobre DMs fechadas de %s", channel.id, user_id)
+        await self.store.save_data()
+
     def _register_guild_commands(self, guild: discord.abc.Snowflake) -> None:
         for cmd in self._staff_commands:
             self.tree.add_command(cmd, guild=guild)
@@ -432,10 +483,15 @@ class CerebrosoBot(commands.Bot):
                         continue
                     if next_ts and next_ts > now_ts:
                         continue
-                    user = self.get_user(habit.get("user_id")) or await self.fetch_user_safe(
-                        habit.get("user_id")
-                    )
+                    user_id = habit.get("user_id")
+                    user = self.get_user(user_id) or await self.fetch_user_safe(user_id)
                     if not user:
+                        continue
+                    blocked_until = self._dm_blocked_until(user.id)
+                    if blocked_until and blocked_until > now_ts:
+                        if habit.get("next_ts", 0) < blocked_until:
+                            habit["next_ts"] = blocked_until
+                            changed = True
                         continue
                     try:
                         emoji = habit.get("emoji", "✅")
@@ -449,6 +505,11 @@ class CerebrosoBot(commands.Bot):
                         habit["last_message_id"] = message.id
                         habit["last_channel_id"] = message.channel.id
                         habit["next_ts"] = now_ts + interval_min * 60
+                        changed = True
+                        await self._mark_dm_success(user.id)
+                    except discord.Forbidden:
+                        await self._handle_dm_blocked(user.id, channel)
+                        habit["next_ts"] = now_ts + 300
                         changed = True
                     except Exception:
                         logging.exception("Falha ao enviar lembrete de hábito para %s", habit["user_id"])
@@ -482,7 +543,14 @@ class CerebrosoBot(commands.Bot):
                         hour, minute = hhmm
                         if now_local.hour == hour and now_local.minute == minute:
                             ann = rotina.setdefault("announcements", {})
-                            if today in ann:
+                            daily = ann.get(today)
+                            if isinstance(daily, dict) and "message_id" in daily:
+                                daily = {"__legacy__": daily}
+                                ann[today] = daily
+                            if not isinstance(daily, dict):
+                                daily = {}
+                                ann[today] = daily
+                            if entry in daily:
                                 continue
                             emoji = rotina.get("emoji", "✅")
                             view = RotinaButton(self, rotina["id"], today, emoji)
@@ -497,7 +565,20 @@ class CerebrosoBot(commands.Bot):
                                     await message.add_reaction(emoji)
                                 except Exception:
                                     pass
-                                ann[today] = {"message_id": message.id, "ts": to_timestamp(now_utc)}
+                                daily[entry] = {
+                                    "message_id": message.id,
+                                    "ts": to_timestamp(now_utc),
+                                    "time": entry,
+                                }
+                                enrollments = rotina.get("enrollments", {})
+                                now_ts = int(time.time())
+                                confirmations_map = rotina.setdefault("confirmations", {}).setdefault(today, {})
+                                for user_id_str, prefs in enrollments.items():
+                                    if not prefs.get("dm", True):
+                                        continue
+                                    if confirmations_map.get(user_id_str):
+                                        continue
+                                    prefs["next_ts"] = now_ts
                                 await self.store.save_data()
                             except Exception:
                                 logging.exception("Erro ao anunciar rotina %s", rotina["name"])
@@ -525,13 +606,26 @@ class CerebrosoBot(commands.Bot):
                     enrollments = rotina.get("enrollments", {})
                     emoji = rotina.get("emoji", "✅")
                     announcements = rotina.setdefault("announcements", {})
-                    ann_info = announcements.get(today)
+                    daily = announcements.get(today)
+                    ann_info: Optional[Dict[str, Any]] = None
+                    if isinstance(daily, dict):
+                        if "message_id" in daily:
+                            ann_info = daily
+                        else:
+                            valid_entries = [
+                                value
+                                for value in daily.values()
+                                if isinstance(value, dict) and value.get("message_id")
+                            ]
+                            if valid_entries:
+                                ann_info = max(valid_entries, key=lambda v: int(v.get("ts", 0)))
                     if not isinstance(ann_info, dict):
                         continue
                     message_id = ann_info.get("message_id")
                     if not message_id:
                         continue
                     jump_url = f"https://discord.com/channels/{channel.guild.id}/{channel.id}/{message_id}"
+                    save_needed = False
                     for user_id_str, prefs in enrollments.items():
                         user_id = int(user_id_str)
                         if not prefs.get("dm", True):
@@ -541,6 +635,12 @@ class CerebrosoBot(commands.Bot):
                         interval_min = max(5, int(prefs.get("interval_min", 90)))
                         next_ts = prefs.get("next_ts", 0)
                         if next_ts and next_ts > now_ts:
+                            continue
+                        blocked_until = self._dm_blocked_until(user_id)
+                        if blocked_until and blocked_until > now_ts:
+                            if prefs.get("next_ts", 0) < blocked_until:
+                                prefs["next_ts"] = blocked_until
+                                save_needed = True
                             continue
                         quiet = prefs.get("quiet", {"start": "06:00", "end": "23:00"})
                         if not self._is_within_window(now_ts, quiet.get("start"), quiet.get("end"), tz):
@@ -554,9 +654,16 @@ class CerebrosoBot(commands.Bot):
                                 f"{emoji} Olá! Já fez a rotina **{rotina['name']}** hoje? Clique em 'Fiz!' ou reaja com {emoji} no anúncio do servidor.{extra}"
                             )
                             prefs["next_ts"] = now_ts + interval_min * 60
-                            await self.store.save_data()
+                            save_needed = True
+                            await self._mark_dm_success(user_id)
+                        except discord.Forbidden:
+                            await self._handle_dm_blocked(user_id, channel)
+                            prefs["next_ts"] = now_ts + 300
+                            save_needed = True
                         except Exception:
                             logging.exception("Falha ao enviar DM da rotina para %s", user_id)
+                    if save_needed:
+                        await self.store.save_data()
             except asyncio.CancelledError:
                 raise
             except Exception:
