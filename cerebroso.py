@@ -148,6 +148,7 @@ def default_state() -> Dict[str, Any]:
             "user_timezones": {},
         },
         "dm_status": {},
+        "rotina_summaries": {},
     }
 
 
@@ -282,6 +283,7 @@ class CerebrosoBot(commands.Bot):
         self.bg_tasks.append(self.loop.create_task(self.habito_loop()))
         self.bg_tasks.append(self.loop.create_task(self.rotina_anuncio_loop()))
         self.bg_tasks.append(self.loop.create_task(self.rotina_dm_loop()))
+        self.bg_tasks.append(self.loop.create_task(self.rotina_summary_loop()))
         self.bg_tasks.append(self.loop.create_task(self.pomodoro_loop()))
 
     async def close(self) -> None:
@@ -343,6 +345,7 @@ class CerebrosoBot(commands.Bot):
             entry.setdefault("blocked", False)
             entry.setdefault("next_check", 0)
             entry.setdefault("notified", {})
+        entry.setdefault("daily_limit", {})
         status_map[str(user_id)] = entry
         return entry
 
@@ -370,16 +373,31 @@ class CerebrosoBot(commands.Bot):
         entry["blocked"] = True
         entry["next_check"] = now_ts + 300
         notified = entry.setdefault("notified", {})
+        limits = entry.setdefault("daily_limit", {})
         if isinstance(channel, discord.TextChannel):
             channel_key = str(channel.id)
-            last_notified = int(notified.get(channel_key, 0))
-            if now_ts - last_notified >= 300:
+            tz = self.resolve_timezone(guild_id=channel.guild.id)
+            date_key = today_key(tz=tz)
+            info = notified.get(channel_key)
+            if isinstance(info, dict):
+                last_notified = int(info.get("ts", 0))
+                count = int(info.get("count", 0))
+                info_date = info.get("date")
+            else:
+                last_notified = int(info or 0)
+                info_date = date_key
+                count = 0
+            if info_date != date_key:
+                count = 0
+            if count < 2 and now_ts - last_notified >= 300:
                 try:
                     await channel.send(
                         f"⚠️ <@{user_id}>, suas DMs estão fechadas; não consigo te mandar os lembretes das rotinas e hábitos! "
                         "Assim que reabrir, volto a cuidar de você por aqui 💛"
                     )
-                    notified[channel_key] = now_ts
+                    notified[channel_key] = {"ts": now_ts, "count": count + 1, "date": date_key}
+                    limits_key = f"{channel.guild.id}:{date_key}"
+                    limits[limits_key] = int(limits.get(limits_key, 0)) + 1
                 except Exception:
                     logging.exception("Falha ao avisar canal %s sobre DMs fechadas de %s", channel.id, user_id)
         await self.store.save_data()
@@ -484,6 +502,14 @@ class CerebrosoBot(commands.Bot):
                     if next_ts and next_ts > now_ts:
                         continue
                     user_id = habit.get("user_id")
+                    if guild_id:
+                        guild = self.get_guild(int(guild_id))
+                        if guild:
+                            member = await self._ensure_member(guild, user_id)
+                            if member is None:
+                                habit["next_ts"] = now_ts + 86400
+                                changed = True
+                                continue
                     user = self.get_user(user_id) or await self.fetch_user_safe(user_id)
                     if not user:
                         continue
@@ -632,6 +658,11 @@ class CerebrosoBot(commands.Bot):
                             continue
                         if confirmations.get(str(user_id)):
                             continue
+                        member = await self._ensure_member(channel.guild, user_id)
+                        if member is None:
+                            prefs["next_ts"] = now_ts + 86400
+                            save_needed = True
+                            continue
                         interval_min = max(5, int(prefs.get("interval_min", 90)))
                         next_ts = prefs.get("next_ts", 0)
                         if next_ts and next_ts > now_ts:
@@ -670,6 +701,70 @@ class CerebrosoBot(commands.Bot):
                 logging.exception("Erro no loop de DMs de rotina")
             await asyncio.sleep(30)
 
+    async def rotina_summary_loop(self) -> None:
+        await self.wait_until_ready()
+        while not self.is_closed():
+            try:
+                now_utc = datetime.now(timezone.utc)
+                summaries = self.store.data.setdefault("rotina_summaries", {})
+                for guild in list(self.guilds):
+                    tz = self.resolve_timezone(guild_id=guild.id)
+                    now_local = now_utc.astimezone(tz)
+                    today = now_local.date().isoformat()
+                    if not (now_local.hour == 23 and now_local.minute >= 50):
+                        continue
+                    guild_state = summaries.setdefault(str(guild.id), {})
+                    user_confirmations: Dict[int, List[str]] = defaultdict(list)
+                    for rotina in self.store.data.get("global_habits", []):
+                        channel = self.get_channel(rotina.get("channel_id"))
+                        if not isinstance(channel, discord.TextChannel):
+                            continue
+                        if channel.guild.id != guild.id:
+                            continue
+                        confirmations = rotina.get("confirmations", {}).get(today, {})
+                        for user_id_str, done in confirmations.items():
+                            if not done:
+                                continue
+                            try:
+                                user_id = int(user_id_str)
+                            except (TypeError, ValueError):
+                                continue
+                            user_confirmations[user_id].append(rotina.get("name", "Rotina"))
+                    if not user_confirmations:
+                        continue
+                    save_needed = False
+                    for user_id, names in user_confirmations.items():
+                        if not names:
+                            continue
+                        last_sent = guild_state.get(str(user_id))
+                        if last_sent == today:
+                            continue
+                        member = await self._ensure_member(guild, user_id)
+                        if member is None:
+                            continue
+                        try:
+                            lines = "\n".join(f"• {name}" for name in names)
+                            await member.send(
+                                "🌼 Resumo do dia: você marcou as rotinas de hoje!\n" f"{lines}\n\nAté amanhã 💛"
+                            )
+                            guild_state[str(user_id)] = today
+                            save_needed = True
+                            await self._mark_dm_success(user_id)
+                        except discord.Forbidden:
+                            channel = guild.system_channel
+                            if not isinstance(channel, discord.TextChannel):
+                                channel = None
+                            await self._handle_dm_blocked(user_id, channel)
+                        except Exception:
+                            logging.exception("Falha ao enviar resumo diário para %s", user_id)
+                    if save_needed:
+                        await self.store.save_data()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logging.exception("Erro no loop de resumos de rotina")
+            await asyncio.sleep(60)
+
     async def fetch_user_safe(self, user_id: int) -> Optional[discord.User]:
         try:
             return await self.fetch_user(user_id)
@@ -681,6 +776,12 @@ class CerebrosoBot(commands.Bot):
             return await guild.fetch_member(user_id)
         except Exception:
             return None
+
+    async def _ensure_member(self, guild: discord.Guild, user_id: int) -> Optional[discord.Member]:
+        member = guild.get_member(user_id)
+        if member:
+            return member
+        return await self._fetch_member_safe(guild, user_id)
 
     def _is_within_window(
         self, ts: int, start: Optional[str], end: Optional[str], tz: ZoneInfo
