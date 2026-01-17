@@ -95,6 +95,13 @@ def parse_datetime_option(text: str, tz: ZoneInfo) -> Optional[int]:
         return None
 
 
+def end_of_day_ts(tz: ZoneInfo) -> int:
+    now_local = datetime.now(tz)
+    next_day = now_local.date() + timedelta(days=1)
+    end_local = datetime(next_day.year, next_day.month, next_day.day, tzinfo=tz)
+    return to_timestamp(end_local.astimezone(timezone.utc))
+
+
 def hhmm_list_from_csv(csv: Optional[str]) -> Optional[List[str]]:
     if csv is None:
         return None
@@ -251,6 +258,45 @@ class RotinaButton(discord.ui.View):
         await interaction.response.send_message(random.choice(CUTE_MESSAGES), ephemeral=True)
 
 
+class RotinaDMView(discord.ui.View):
+    def __init__(
+        self,
+        bot: "CerebrosoBot",
+        rotina_id: int,
+        user_id: int,
+        tz: ZoneInfo,
+    ) -> None:
+        super().__init__(timeout=86400)
+        self.bot = bot
+        self.rotina_id = rotina_id
+        self.user_id = user_id
+        self.tz = tz
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "Esses botões são só para você 💛", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Não vou fazer hoje", style=discord.ButtonStyle.secondary, custom_id="rotina_skip")
+    async def skip_today(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
+        await self.bot.rotina_skip_today(self.rotina_id, self.user_id, self.tz)
+        await interaction.response.send_message(
+            "Tudo bem! Vou pausar os lembretes desta rotina até amanhã 🌙",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Sair da Rotina", style=discord.ButtonStyle.danger, custom_id="rotina_leave_dm")
+    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
+        await self.bot.rotina_leave(self.rotina_id, self.user_id)
+        await interaction.response.send_message(
+            "Você saiu dessa rotina. Quando quiser voltar, é só usar `/rotina entrar` 💛",
+            ephemeral=True,
+        )
+
+
 class CerebrosoBot(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -401,6 +447,29 @@ class CerebrosoBot(commands.Bot):
                 except Exception:
                     logging.exception("Falha ao avisar canal %s sobre DMs fechadas de %s", channel.id, user_id)
         await self.store.save_data()
+
+    async def rotina_skip_today(self, rotina_id: int, user_id: int, tz: ZoneInfo) -> None:
+        for rotina in self.store.data.get("global_habits", []):
+            if rotina.get("id") != rotina_id:
+                continue
+            enrollments = rotina.setdefault("enrollments", {})
+            prefs = enrollments.get(str(user_id))
+            if not isinstance(prefs, dict):
+                return
+            snooze_until = end_of_day_ts(tz)
+            prefs["snooze_until"] = snooze_until
+            prefs["next_ts"] = snooze_until
+            await self.store.save_data()
+            return
+
+    async def rotina_leave(self, rotina_id: int, user_id: int) -> None:
+        for rotina in self.store.data.get("global_habits", []):
+            if rotina.get("id") != rotina_id:
+                continue
+            enrollments = rotina.setdefault("enrollments", {})
+            if enrollments.pop(str(user_id), None):
+                await self.store.save_data()
+            return
 
     def _register_guild_commands(self, guild: discord.abc.Snowflake) -> None:
         for cmd in self._staff_commands:
@@ -604,6 +673,9 @@ class CerebrosoBot(commands.Bot):
                                         continue
                                     if confirmations_map.get(user_id_str):
                                         continue
+                                    snooze_until = int(prefs.get("snooze_until", 0) or 0)
+                                    if snooze_until and snooze_until > now_ts:
+                                        continue
                                     prefs["next_ts"] = now_ts
                                 await self.store.save_data()
                             except Exception:
@@ -658,6 +730,12 @@ class CerebrosoBot(commands.Bot):
                             continue
                         if confirmations.get(str(user_id)):
                             continue
+                        snooze_until = int(prefs.get("snooze_until", 0) or 0)
+                        if snooze_until:
+                            if snooze_until > now_ts:
+                                continue
+                            prefs.pop("snooze_until", None)
+                            save_needed = True
                         member = await self._ensure_member(channel.guild, user_id)
                         if member is None:
                             prefs["next_ts"] = now_ts + 86400
@@ -682,7 +760,11 @@ class CerebrosoBot(commands.Bot):
                         try:
                             extra = f"\n👉 Confirme aqui: {jump_url}"
                             await user.send(
-                                f"{emoji} Olá! Já fez a rotina **{rotina['name']}** hoje? Clique em 'Fiz!' ou reaja com {emoji} no anúncio do servidor.{extra}"
+                                (
+                                    f"{emoji} Olá! Já fez a rotina **{rotina['name']}** hoje? "
+                                    f"Clique em 'Fiz!' ou reaja com {emoji} no anúncio do servidor.{extra}"
+                                ),
+                                view=RotinaDMView(self, rotina["id"], user_id, tz),
                             )
                             prefs["next_ts"] = now_ts + interval_min * 60
                             save_needed = True
@@ -2187,4 +2269,3 @@ bot.tree.add_command(bot.rotina_group)
 
 if __name__ == "__main__":
     bot.run(config.DISCORD_TOKEN)
-
