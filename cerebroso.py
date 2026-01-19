@@ -280,6 +280,16 @@ class RotinaDMView(discord.ui.View):
             return False
         return True
 
+    @discord.ui.button(label="Fiz!", style=discord.ButtonStyle.primary, custom_id="rotina_fiz_dm")
+    async def fiz(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
+        await self.bot.confirmar_rotina(
+            self.rotina_id,
+            self.user_id,
+            today_key(tz=self.tz),
+            guild_id=interaction.guild_id,
+        )
+        await interaction.response.send_message(random.choice(CUTE_MESSAGES), ephemeral=True)
+
     @discord.ui.button(label="Não vou fazer hoje", style=discord.ButtonStyle.secondary, custom_id="rotina_skip")
     async def skip_today(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:  # type: ignore[override]
         await self.bot.rotina_skip_today(self.rotina_id, self.user_id, self.tz)
