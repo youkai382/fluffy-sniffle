@@ -1913,6 +1913,33 @@ class CerebrosoBot(commands.Bot):
             await self.store.save_data()
             await interaction.response.send_message("Rotina atualizada.", ephemeral=True)
 
+        @admin_group.command(name="remover_membro", description="Remove um membro de uma rotina")
+        @rotina_autocomplete
+        async def admin_remover_membro(
+            interaction: discord.Interaction,
+            nome_ou_id: str,
+            membro: discord.Member,
+        ) -> None:
+            if not has_manage_permission(interaction.user):
+                await interaction.response.send_message("Sem permissão.", ephemeral=True)
+                return
+            rotina = self._find_rotina(nome_ou_id)
+            if not rotina:
+                await interaction.response.send_message("Rotina não encontrada.", ephemeral=True)
+                return
+            enrollments = rotina.setdefault("enrollments", {})
+            if not enrollments.pop(str(membro.id), None):
+                await interaction.response.send_message(
+                    f"{membro.mention} não está inscrito nessa rotina.",
+                    ephemeral=True,
+                )
+                return
+            await self.store.save_data()
+            await interaction.response.send_message(
+                f"{membro.mention} foi removido da rotina **{rotina.get('name', 'Rotina')}**.",
+                ephemeral=True,
+            )
+
         @admin_group.command(name="conquista_streak", description="Configura cargo por streak")
         @rotina_autocomplete
         async def admin_conquista_streak(
